@@ -1,43 +1,93 @@
-CHANGE Projection TJM réel :=
-VAR CurrentMonth =
-    MAX('Axis'[Value])
+Final Running Measure :=
+VAR currentN = MAX('Axis'[Value])
 
-VAR LastActualMonth =
+// Último Change Consommé antes do currentN
+VAR LastConsommeBefore =
     CALCULATE(
-        MAX('Axis'[Value]),
-        FILTER(
-            ALL('Axis'),
-            NOT(ISBLANK([CHANGE Consommé TJM réel (Value)]))
+        [CHANGE Consommé TJM réel (Value)],
+        TOPN(
+            1,
+            FILTER(
+                ALL('Axis'),
+                'Axis'[Value] < currentN &&
+                NOT ISBLANK([CHANGE Consommé TJM réel (Value)])
+            ),
+            'Axis'[Value],
+            DESC
         )
     )
 
-VAR ActualValue =
-    [CHANGE Consommé TJM réel (Value)]
-
-VAR LastActualConsomme =
+// Current Consommé do ponto actual
+VAR CurrentConsomme =
     CALCULATE(
         [CHANGE Consommé TJM réel (Value)],
-        'Axis'[Value] = LastActualMonth
+        'Axis'[Value] = currentN
     )
 
-VAR RunningETPLastActual =
+// Running total ETP até currentN
+VAR RunningETP =
     CALCULATE(
-        [CHANGE ETP (Running Total)],
-        'Axis'[Value] = LastActualMonth
+        SUMX(
+            FILTER(
+                ALL('Axis'),
+                'Axis'[Value] < currentN
+            ),
+            [CHANGE ETP]
+        )
     )
 
-VAR Ratio =
-    DIVIDE(LastActualConsomme, RunningETPLastActual)
+// Current ETP do ponto actual
+VAR CurrentETP =
+    CALCULATE(
+        [CHANGE ETP],
+        'Axis'[Value] = currentN
+    )
 
-VAR RunningETPCurrent =
-    [CHANGE ETP (Running Total)]
+// Resultado para este ponto do eixo
+VAR ResultThisPoint =
+    DIVIDE(
+        IF(ISBLANK(CurrentConsomme), LastConsommeBefore, CurrentConsomme),
+        RunningETP
+    )
+    / ((21+18)/2)
+    * CurrentETP
+    * 17.83
 
-VAR Forecast =
-    Ratio * RunningETPCurrent
-
+// Running total do resultado
 RETURN
-IF(
-    CurrentMonth <= LastActualMonth,
-    ActualValue,
-    Forecast
+SUMX(
+    FILTER(
+        ALL('Axis'),
+        'Axis'[Value] <= currentN
+    ),
+    VAR cn = 'Axis'[Value]
+    VAR lc =
+        CALCULATE(
+            [CHANGE Consommé TJM réel (Value)],
+            TOPN(
+                1,
+                FILTER(
+                    ALL('Axis'),
+                    'Axis'[Value] < cn &&
+                    NOT ISBLANK([CHANGE Consommé TJM réel (Value)])
+                ),
+                'Axis'[Value], DESC
+            )
+        )
+    VAR cc =
+        CALCULATE(
+            [CHANGE Consommé TJM réel (Value)],
+            'Axis'[Value] = cn
+        )
+    VAR rETP =
+        CALCULATE(
+            SUMX(
+                FILTER(ALL('Axis'),'Axis'[Value]<cn),
+                [CHANGE ETP]
+            )
+        )
+    VAR cETP =
+        CALCULATE([CHANGE ETP],'Axis'[Value]=cn)
+    RETURN
+        DIVIDE(IF(ISBLANK(cc), lc, cc), rETP) / ((21+18)/2) * cETP * 17.83
 )
